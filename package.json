@@ -1,0 +1,14 @@
+{
+  "name": "gold-hunter",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"node server/index.js\" \"vite\"",
+    "server": "node server/index.js",
+    "web": "vite",
+    "build": "vite build",
+    "test": "node server/test-guard.js"
+  },
+  "devDependencies": { "concurrently": "^9.0.1", "vite": "^5.4.10" }
+}
