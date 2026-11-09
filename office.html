@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GOLD HUNTER - Kantor 3D</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Instrument+Sans:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #050505; overflow: hidden; color: #ece6d3; font-family: 'Instrument Sans', system-ui, sans-serif; }
+    canvas { display: block; }
+    #bar { position: fixed; top: 0; left: 0; right: 0; padding: 14px clamp(14px, 4vw, 40px); display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    #bar b { font-family: 'Marcellus', Georgia, serif; font-weight: 400; letter-spacing: .14em; color: #d4af37; font-size: 22px; }
+    #bar span, #bar a { color: #8f8870; font-size: 13px; }
+    #bar a { color: #d4af37; }
+    #info { position: fixed; left: clamp(14px, 4vw, 40px); bottom: 20px; max-width: 340px; padding: 14px 16px; border-top: 1px solid #d4af37; background: rgba(10, 9, 6, .88); font-size: 14px; line-height: 1.5; }
+    #info h3 { margin: 0 0 2px; font-family: 'Marcellus', Georgia, serif; font-weight: 400; color: #d4af37; font-size: 20px; }
+    #info .na { color: #c2574b; }
+  </style>
+</head>
+<body>
+  <div id="bar"><b>GOLD HUNTER</b><span id="msg">Memuat agent...</span><a href="/">Ke dashboard</a></div>
+  <div id="info">Klik salah satu agent untuk melihat tugas dan statusnya. Geser untuk memutar, cubit atau scroll untuk zoom.</div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+    const GOLD = 0xd4af37, BAD = 0xc2574b, OK = 0x5fae6b;
+    const NA = 'DATA TIDAK TERSEDIA';
+    // Posisi meja per agent (x, z). Identitas, tugas, dan status selalu dari /api/agents.
+    const SPOT = { head: [0, -6], market: [-7.5, -3], smc: [-2.5, -3], scalp: [2.5, -3], news: [7.5, -3],
+      signal: [-5, 0.5], risk: [0, 0.5], backtest: [5, 0.5], mt5: [-6, 4], telegram: [0, 4], system: [6, 4] };
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050505);
+    scene.fog = new THREE.Fog(0x050505, 20, 42);
+    const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+    camera.position.set(0, 10, 14);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    document.body.prepend(renderer.domElement);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0.8, -0.5);
+    controls.enableDamping = true; controls.maxPolarAngle = Math.PI / 2.1; controls.minDistance = 5; controls.maxDistance = 26;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+    const lamp = new THREE.PointLight(0xffd98a, 140, 50); lamp.position.set(0, 9, 1); scene.add(lamp);
+
+    const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.35, ...extra });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(28, 20), mat(0x0e0c08));
+    floor.rotation.x = -Math.PI / 2; scene.add(floor);
+    const rim = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(28, 20)), new THREE.LineBasicMaterial({ color: GOLD }));
+    rim.rotation.x = -Math.PI / 2; rim.position.y = 0.01; scene.add(rim);
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(28, 6, 0.3), mat(0x0a0907)); wall.position.set(0, 3, -10); scene.add(wall);
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(28, 0.06, 0.34), mat(GOLD)); trim.position.set(0, 0.1, -10); scene.add(trim);
+
+    function label(lines, w, h, colors) {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const g = c.getContext('2d'); g.fillStyle = 'rgba(8,7,5,.92)'; g.fillRect(0, 0, w, h);
+      g.strokeStyle = '#d4af37'; g.lineWidth = 3; g.strokeRect(2, 2, w - 4, h - 4);
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      lines.forEach((t, i) => { g.fillStyle = colors[i]; g.font = (i ? '30px' : '38px') + ' Georgia, serif'; g.fillText(t, w / 2, (h / (lines.length + 1)) * (i + 1)); });
+      return new THREE.CanvasTexture(c);
+    }
+
+    // Layar utama di dinding: hanya menampilkan data yang benar-benar ada.
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(8, 3), new THREE.MeshBasicMaterial({ map: label(['XAU/USD', NA], 800, 300, ['#d4af37', '#c2574b']) }));
+    screen.position.set(0, 3.2, -9.82); scene.add(screen);
+
+    const agentGroups = [];
+    function addAgent(a) {
+      const [x, z] = SPOT[a.id] || [0, 8];
+      const g = new THREE.Group(); g.position.set(x, 0, z); g.userData.agent = a;
+      const desk = new THREE.Mesh(new THREE.BoxGeometry(a.id === 'head' ? 3.2 : 2.2, 0.8, 1.1), mat(0x15120c)); desk.position.y = 0.4; g.add(desk);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(a.id === 'head' ? 3.3 : 2.3, 0.06, 1.2), mat(GOLD)); top.position.y = 0.82; g.add(top);
+      const mon = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.55, 0.05), mat(0x050505, { emissive: 0x1a1608 })); mon.position.set(0, 1.2, -0.3); g.add(mon);
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 0.9, 16), mat(0x1c1812)); body.position.set(0, 1.0, 0.95); g.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 20, 16), mat(GOLD)); head.position.set(0, 1.72, 0.95); g.add(head);
+      const on = a.status !== 'OFFLINE';
+      const light = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), new THREE.MeshBasicMaterial({ color: on ? OK : BAD }));
+      light.position.set(0, 2.2, 0.95); g.add(light); g.userData.light = light;
+      const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: label([a.name, a.status], 512, 128, ['#ece6d3', on ? '#5fae6b' : '#c2574b']), depthTest: false }));
+      tag.scale.set(2.4, 0.6, 1); tag.position.set(0, 2.75, 0.95); g.add(tag);
+      scene.add(g); agentGroups.push(g);
+    }
+
+    const info = document.getElementById('info'), msg = document.getElementById('msg');
+    function show(a) {
+      info.replaceChildren();
+      const h = document.createElement('h3'); h.textContent = a.name;
+      const p = document.createElement('div'); p.textContent = a.role;
+      const d = document.createElement('div'); d.textContent = a.duties;
+      const s = document.createElement('div'); s.textContent = 'Status: ' + a.status + ' | Izin akses: ' + a.permissionCount;
+      if (a.status === 'OFFLINE') s.className = 'na';
+      info.append(h, p, d, s);
+    }
+
+    (async () => { try {
+      const res = await fetch('/api/agents'); if (!res.ok) throw new Error(res.status);
+      const agents = await res.json();
+      agents.forEach(addAgent);
+      msg.textContent = agents.length + ' agent dimuat dari server';
+      const st = await (await fetch('/api/status')).json();
+      if (st.price != null) screen.material.map = label(['XAU/USD', String(st.price)], 800, 300, ['#d4af37', '#ece6d3']);
+    } catch {
+      msg.textContent = 'OFFLINE: server tidak terhubung. Jalankan npm run dev.';
+    } })();
+
+    const ray = new THREE.Raycaster(), ptr = new THREE.Vector2(); let down = null;
+    renderer.domElement.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return; // geser kamera, bukan klik
+      ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ptr, camera);
+      const hit = ray.intersectObjects(agentGroups, true)[0]; if (!hit) return;
+      let o = hit.object; while (o && !o.userData.agent) o = o.parent; if (o) show(o.userData.agent);
+    });
+    addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+    const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    renderer.setAnimationLoop((t) => {
+      if (!calm) agentGroups.forEach((g) => { g.userData.light.scale.setScalar(1 + 0.25 * Math.sin(t / 500)); });
+      controls.update(); renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>
